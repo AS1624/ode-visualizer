@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Series solutions</title>
+<style>
+:root{--bg:#f5f7f9;--field:#fff;--panel:#e8edf1;--fg:#14202b;--mut:#66727e;--line:#cfd7de;--grid:#e1e7ec;--axis:#8a96a2;--accent:#0b5fff;--err:#c4372e;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10161c;--field:#0a0e12;--panel:#18212a;--fg:#e8edf2;--mut:#8b97a3;--line:#2c3844;--grid:#1c2630;--axis:#56636f;--accent:#6ea0ff;--err:#ff7b6f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#10161c;--field:#0a0e12;--panel:#18212a;--fg:#e8edf2;--mut:#8b97a3;--line:#2c3844;--grid:#1c2630;--axis:#56636f;--accent:#6ea0ff;--err:#ff7b6f;color-scheme:dark}
+*{box-sizing:border-box}
+html{height:100%;background:var(--bg);scroll-padding-top:env(safe-area-inset-top,0px)}
+body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Helvetica Neue",sans-serif;overflow:hidden;touch-action:manipulation;-webkit-text-size-adjust:100%;-webkit-touch-callout:none}
+#app{display:flex;height:100%}
+#side{width:min(410px,40%);flex:none;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:14px;gap:12px;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch}#side>*{flex:none}
+#plot{flex:1;position:relative;min-width:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+h1{margin:0;font:italic 600 22px/1.2 "New York",Georgia,serif}
+#rows{flex:none}
+.row{background:var(--bg);border:1px solid var(--line);border-left:5px solid var(--rc);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:8px;color:var(--mut)}
+.sg{font-size:28px;line-height:1;color:var(--fg)}
+.coef{width:76px}.start{width:60px}.x{margin-left:auto}
+.msg{color:var(--err);font-size:13px}.msg:empty{display:none}
+input[type=text]{height:44px;min-width:0;padding:0 10px;-webkit-appearance:none;appearance:none;border:2px solid var(--axis);border-radius:8px;background:var(--field);color:var(--fg);font:17px ui-monospace,"SF Mono",Menlo,monospace}
+.body{width:100%}
+input[type=text]:focus{outline:2px solid var(--accent);outline-offset:0}
+input[aria-invalid=true]{border-color:var(--err)}
+#consts{display:flex;flex-wrap:wrap;gap:8px}
+#consts[hidden]{display:none}
+.kc{display:flex;align-items:center;gap:6px;font:italic 600 18px "New York",Georgia,serif}
+.kc input{width:110px}
+button{font:inherit;height:44px;min-width:44px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
+button:active{background:var(--line)}
+#ctl{display:flex;flex-direction:column;gap:6px}
+.sl{display:flex;justify-content:space-between;font-weight:600}
+output{font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;height:44px;margin:0;accent-color:var(--accent)}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+.chk{display:flex;align-items:center;gap:10px;height:40px}
+.chk input{width:22px;height:22px;margin:0;accent-color:var(--accent)}
+#probe{position:absolute;top:12px;right:12px;padding:8px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;font-size:15px;font-variant-numeric:tabular-nums;pointer-events:none}
+#probe[hidden]{display:none}
+@media (orientation:portrait){#app{flex-direction:column}#plot{order:-1}#side{width:auto;height:48%;border-right:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <h1>y(t) = Σ cᵢ · Σₙ aₙ(t)</h1>
+    <div id="rows"></div>
+    <div id="consts" hidden></div>
+    <div id="ctl">
+      <label class="sl" for="N"><span>Terms</span><output id="nout">20</output></label>
+      <input type="range" id="N" min="1" max="150" value="20">
+      <div class="btns"><button id="add">+ Summation</button><button id="fit">Fit y</button><button id="reset">Reset view</button></div>
+      <label class="chk"><input type="checkbox" id="parts" checked> Show each summation</label>
+    </div>
+  </aside>
+  <main id="plot"><canvas id="cv"></canvas><div id="probe" hidden></div></main>
+</div>
+<script>
+/* ---------- expression compiler: typed math -> JS function ---------- */
+const FT=[1];for(let i=1;i<=170;i++)FT[i]=FT[i-1]*i;
+function gamma(x){
+  if(Number.isInteger(x)&&x<=0)return NaN;
+  if(x<.5)return Math.PI/(Math.sin(Math.PI*x)*gamma(1-x));
+  if(Number.isInteger(x))return x<=171?FT[x-1]:Infinity;
+  x-=1;const c=[.99999999999980993,676.5203681218851,-1259.1392167224028,771.32342877765313,-176.61502916214059,12.507343278686905,-.13857109526572012,9.9843695780195716e-6,1.5056327351493116e-7],t=x+7.5;
+  let a=c[0];for(let i=1;i<9;i++)a+=c[i]/(x+i);
+  return Math.sqrt(2*Math.PI)*Math.pow(t,x+.5)*Math.exp(-t)*a;
+}
+const fact=x=>Number.isInteger(x)&&x>=0?(x<=170?FT[x]:Infinity):gamma(x+1);
+const M={...Object.fromEntries('sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh sqrt cbrt exp log abs sign floor ceil'.split(' ').map(k=>[k,Math[k]])),ln:Math.log,gamma,fact,P:Math.pow,F:fact};
+const NAMES='asinh acosh atanh sinh cosh tanh asin acos atan sqrt cbrt gamma sign floor ceil fact sin cos tan exp log ln abs pi e n t x'.split(' ').sort((a,b)=>b.length-a.length);
+const KRE=/a_?\{?(\d+)\}?/g;   /* a_0, a0, a_{0} -> user constant */
+function lex(s){
+  s=s.toLowerCase().replace(/[−–—]/g,'-').replace(/[×·⋅]/g,'*').replace(/÷/g,'/').replace(/π/g,'pi').replace(/√/g,'sqrt').replace(/\*\*/g,'^').replace(KRE,' @$1 ');
+  const T=[];let m;
+  while(s.length){
+    if(m=/^\s+/.exec(s)){}
+    else if(m=/^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/.exec(s))T.push({k:'num',v:m[0]});
+    else if(m=/^@(\d+)/.exec(s))T.push({k:'k',v:m[1]});
+    else if(m=/^[a-z]+/.exec(s)){let w=m[0];while(w){const nm=NAMES.find(x=>w.startsWith(x));if(!nm)throw new Error(`Unknown “${w}”`);T.push({k:'id',v:nm});w=w.slice(nm.length)}}
+    else if(m=/^[-+*\/^!(),]/.exec(s))T.push({k:'op',v:m[0]});
+    else throw new Error(`Unexpected “${s[0]}”`);
+    s=s.slice(m[0].length);
+  }
+  return T;
+}
+function compile(src,vars){
+  const T=lex(src);let p=0;
+  const bad=m=>{throw new Error(m)};
+  const eat=v=>T[p]&&T[p].k==='op'&&T[p].v===v?(p++,1):0;
+  const atomNext=()=>T[p]&&(T[p].k!=='op'||T[p].v==='(');
+  function expr(){let a=term();for(;;){if(eat('+'))a=`(${a}+${term()})`;else if(eat('-'))a=`(${a}-${term()})`;else return a}}
+  function term(){let a=unary();for(;;){if(eat('*'))a=`(${a}*${unary()})`;else if(eat('/'))a=`(${a}/${unary()})`;else if(atomNext())a=`(${a}*${power()})`;else return a}}
+  function unary(){return eat('-')?`(-${unary()})`:eat('+')?unary():power()}
+  function power(){let a=atom();while(eat('!'))a=`M.F(${a})`;return eat('^')?`M.P(${a},${unary()})`:a}
+  function atom(){
+    const k=T[p++];if(!k)bad('Expression ends early');
+    if(k.k==='num')return k.v;
+    if(k.k==='k'){if(!vars.includes('t'))bad(`a${k.v} isn’t available here`);return `K[${+k.v}]`}
+    if(k.k==='op'){if(k.v!=='(')bad(`Unexpected “${k.v}”`);const a=expr();eat(')')||bad('Missing )');return `(${a})`}
+    const v=k.v;
+    if(v==='pi')return 'Math.PI';if(v==='e')return 'Math.E';
+    if(v==='n'||v==='t'||v==='x'){const w=v==='x'?'t':v;if(!vars.includes(w))bad(`“${v}” isn’t available here`);return w}
+    if(!eat('('))bad(`${v} needs parentheses`);
+    const a=[expr()];while(eat(','))a.push(expr());eat(')')||bad('Missing )');
+    return `M.${v}(${a})`;
+  }
+  if(!T.length)bad('Empty');
+  const code=expr();if(p<T.length)bad(`Unexpected “${T[p].v}”`);
+  return new Function('M','K',`return function(${vars}){return ${code}}`)(M,K);
+}
+
+/* ---------- state ---------- */
+const $=s=>document.querySelector(s),cv=$('#cv'),ctx=cv.getContext('2d');
+let cx=0,cy=0,sx=50,sy=50,N=20,probe=null,W=0,H=0,dpr=1,inited=0,ci=0;
+const rows=[],PAL=['#e0475b','#1f9d8b','#d98a1f','#7a5cc4','#2f80d9','#7f9a2a'];
+const A='autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done"';
+const K={},ctext=new Map(),sub=i=>String(i).replace(/\d/g,d=>'₀₁₂₃₄₅₆₇₈₉'[d]);
+
+/* ---------- constants (a_0, a_1, …) ---------- */
+function setK(i,txt){
+  ctext.set(i,txt);
+  try{const v=compile(txt.trim()||'0','')();K[i]=isFinite(v)?v:NaN}catch(e){K[i]=NaN}
+}
+function syncConsts(){
+  const used=new Set(),box=$('#consts');
+  for(const r of rows)r.used.forEach(i=>used.add(i));
+  for(const el of [...box.children])if(!used.has(+el.dataset.i))el.remove();
+  for(const i of used){
+    if(!ctext.has(i))setK(i,'1');
+    if(box.querySelector(`[data-i="${i}"]`))continue;
+    const el=document.createElement('label');el.className='kc';el.dataset.i=i;
+    el.innerHTML=`<span>a${sub(i)} =</span><input type="text" aria-label="Value of a${i}" ${A}>`;
+    const inp=el.querySelector('input');inp.value=ctext.get(i);
+    inp.addEventListener('input',()=>{setK(i,inp.value);inp.setAttribute('aria-invalid',String(!isFinite(K[i])));redraw()});
+    box.append(el);
+  }
+  [...box.children].sort((a,b)=>a.dataset.i-b.dataset.i).forEach(el=>box.append(el));
+  box.hidden=!used.size;
+}
+
+/* ---------- rows ---------- */
+function compileRow(r){
+  r.f=null;r.err='';r.used=new Set();
+  for(const s of [r.coef.value,r.body.value])for(const m of s.toLowerCase().matchAll(KRE))r.used.add(+m[1]);
+  if(r.body.value.trim()){
+    try{
+      r.c=compile(r.coef.value.trim()||'1','t');
+      r.s=Math.round(compile(r.start.value.trim()||'0','')());
+      if(!isFinite(r.s))throw new Error('Start must be a number');
+      r.f=compile(r.body.value,'n,t');
+    }catch(e){r.err=e.message||String(e)}
+  }
+  r.msg.textContent=r.err;
+  syncConsts();
+}
+function addRow(c,s,b){
+  const color=PAL[ci++%PAL.length],el=document.createElement('div');
+  el.className='row';el.style.setProperty('--rc',color);
+  el.innerHTML=`<div class="top"><input type="text" class="coef" placeholder="1" aria-label="Coefficient" ${A}><span>·</span><span class="sg">Σ</span><span>n =</span><input type="text" class="start" aria-label="Start index" ${A}><span>to ∞</span><button class="x" aria-label="Remove summation">×</button></div><input type="text" class="body" placeholder="t^(n/2+1) / n!" aria-label="Summand" ${A}><div class="msg"></div>`;
+  const q=k=>el.querySelector(k),r={el,color,coef:q('.coef'),start:q('.start'),body:q('.body'),msg:q('.msg')};
+  r.coef.value=c;r.start.value=s;r.body.value=b;
+  for(const i of [r.coef,r.start,r.body])i.addEventListener('input',()=>{compileRow(r);redraw()});
+  q('.x').onclick=()=>{el.remove();rows.splice(rows.indexOf(r),1);syncConsts();redraw()};
+  $('#rows').append(el);rows.push(r);compileRow(r);
+  return r;
+}
+
+/* ---------- evaluation ---------- */
+function evalRows(xs){
+  const parts=[],tot=new Float64Array(xs.length);
+  for(const r of rows){
+    if(!r.f||r.err)continue;
+    const v=new Float64Array(xs.length),f=r.f,c=r.c,s=r.s;
+    for(let i=0;i<xs.length;i++){const t=xs[i];let a=0;for(let j=0;j<N;j++)a+=f(s+j,t);v[i]=a*c(t);tot[i]+=v[i]}
+    parts.push({v,color:r.color});
+  }
+  return{tot,parts};
+}
+function sample(){const xs=new Float64Array(Math.ceil(W)+1);for(let i=0;i<xs.length;i++)xs[i]=cx+(i-W/2)/sx;return xs}
+
+/* ---------- drawing ---------- */
+const fmt=v=>String(+v.toPrecision(6));
+const nice=r=>{const p=10**Math.floor(Math.log10(r)),m=r/p;return p*(m<=1?1:m<=2?2:m<=5?5:10)};
+let q=0;const redraw=()=>{q||(q=requestAnimationFrame(()=>{q=0;draw()}))};
+function draw(){
+  if(!W||!H)return;
+  const cs=getComputedStyle(document.documentElement),C=k=>cs.getPropertyValue(k).trim();
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle=C('--bg');ctx.fillRect(0,0,W,H);
+  const X=t=>W/2+(t-cx)*sx,Y=v=>H/2-(v-cy)*sy;
+  const x0=cx-W/2/sx,x1=cx+W/2/sx,y0=cy-H/2/sy,y1=cy+H/2/sy,gx=nice(90/sx),gy=nice(70/sy);
+  ctx.lineWidth=1;ctx.strokeStyle=C('--grid');ctx.beginPath();
+  for(let i=Math.ceil(x0/gx);i*gx<=x1;i++){const p=Math.round(X(i*gx))+.5;ctx.moveTo(p,0);ctx.lineTo(p,H)}
+  for(let j=Math.ceil(y0/gy);j*gy<=y1;j++){const p=Math.round(Y(j*gy))+.5;ctx.moveTo(0,p);ctx.lineTo(W,p)}
+  ctx.stroke();
+  ctx.strokeStyle=C('--axis');ctx.lineWidth=1.5;ctx.beginPath();
+  if(x0<0&&x1>0){const p=Math.round(X(0))+.5;ctx.moveTo(p,0);ctx.lineTo(p,H)}
+  if(y0<0&&y1>0){const p=Math.round(Y(0))+.5;ctx.moveTo(0,p);ctx.lineTo(W,p)}
+  ctx.stroke();
+  ctx.font='12px system-ui,-apple-system,sans-serif';ctx.fillStyle=C('--mut');
+  const ly=Math.min(H-6,Math.max(14,Y(0)+16)),lx=Math.min(W-60,Math.max(4,X(0)+6));
+  ctx.textAlign='center';
+  for(let i=Math.ceil(x0/gx);i*gx<=x1;i++)if(i)ctx.fillText(fmt(i*gx),X(i*gx),ly);
+  ctx.textAlign='left';
+  for(let j=Math.ceil(y0/gy);j*gy<=y1;j++)if(j)ctx.fillText(fmt(j*gy),lx,Y(j*gy)-4);
+
+  const line=(v,col,w)=>{
+    ctx.strokeStyle=col;ctx.lineWidth=w;ctx.lineJoin='round';ctx.beginPath();let pen=0;
+    for(let i=0;i<v.length;i++){const a=v[i];if(!isFinite(a)){pen=0;continue}const y=Math.max(-1e5,Math.min(H+1e5,Y(a)));pen?ctx.lineTo(i,y):ctx.moveTo(i,y);pen=1}
+    ctx.stroke();
+  };
+  const{tot,parts}=evalRows(sample());
+  if(parts.length>1&&$('#parts').checked)for(const p of parts)line(p.v,p.color,1.5);
+  if(parts.length)line(tot,C('--fg'),2.75);
+
+  const pill=$('#probe');
+  if(probe===null)pill.hidden=true;
+  else{
+    const r=evalRows([probe]),y=r.parts.length?r.tot[0]:NaN,px=X(probe);
+    ctx.strokeStyle=C('--accent');ctx.lineWidth=1.5;ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(px,0);ctx.lineTo(px,H);ctx.stroke();ctx.setLineDash([]);
+    if(isFinite(y)){ctx.fillStyle=C('--accent');ctx.beginPath();ctx.arc(px,Y(y),5,0,7);ctx.fill()}
+    pill.hidden=false;pill.textContent=`t = ${fmt(probe)}   y = ${isFinite(y)?fmt(y):'undefined'}`;
+  }
+}
+
+/* ---------- view control ---------- */
+const cl=v=>Math.min(1e7,Math.max(1e-3,v));
+function resetView(){cx=cy=0;sx=sy=Math.max(W,200)/16}
+function fit(){
+  const a=[...evalRows(sample()).tot].filter(isFinite).sort((p,q)=>p-q);
+  if(a.length<2||!rows.some(r=>r.f&&!r.err))return;
+  let lo=a[Math.floor(a.length*.03)],hi=a[Math.floor(a.length*.97)];
+  if(hi-lo<1e-9){lo-=1;hi+=1}
+  const pad=(hi-lo)*.12;lo-=pad;hi+=pad;cy=(lo+hi)/2;sy=cl(H/(hi-lo));redraw();
+}
+const P=new Map();let moved=0,t0=0;
+const pos=e=>{const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}};
+cv.onpointerdown=e=>{cv.setPointerCapture(e.pointerId);P.set(e.pointerId,pos(e));if(P.size==1){moved=0;t0=Date.now()}else moved=99};
+cv.onpointermove=e=>{
+  const a=P.get(e.pointerId);if(!a)return;const b=pos(e);
+  if(P.size==1){const dx=b.x-a.x,dy=b.y-a.y;moved+=Math.abs(dx)+Math.abs(dy);cx-=dx/sx;cy+=dy/sy}
+  else if(P.size==2){
+    const o=[...P].find(([id])=>id!==e.pointerId)[1];
+    const mx0=(a.x+o.x)/2,my0=(a.y+o.y)/2,mx1=(b.x+o.x)/2,my1=(b.y+o.y)/2;
+    const dx0=Math.abs(a.x-o.x),dy0=Math.abs(a.y-o.y),dx1=Math.abs(b.x-o.x),dy1=Math.abs(b.y-o.y);
+    let kx=dx0>60?dx1/dx0:1,ky=dy0>60?dy1/dy0:1;
+    if(dx0<=60&&dy0<=60)kx=ky=Math.hypot(dx1,dy1)/Math.max(1,Math.hypot(dx0,dy0));
+    const wx=cx+(mx0-W/2)/sx,wy=cy-(my0-H/2)/sy;
+    sx=cl(sx*kx);sy=cl(sy*ky);cx=wx-(mx1-W/2)/sx;cy=wy+(my1-H/2)/sy;
+  }else return;
+  P.set(e.pointerId,b);redraw();
+};
+cv.onpointerup=cv.onpointercancel=e=>{
+  if(e.type==='pointerup'&&P.size==1&&P.has(e.pointerId)&&moved<8&&Date.now()-t0<600){
+    const p=pos(e);
+    probe=(probe!==null&&Math.abs(W/2+(probe-cx)*sx-p.x)<14)?null:cx+(p.x-W/2)/sx;redraw();
+  }
+  P.delete(e.pointerId);
+};
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();const p=pos(e),k=Math.exp(-e.deltaY*(e.ctrlKey?.01:.0015)),kx=e.altKey?1:k,ky=e.shiftKey?1:k;
+  const wx=cx+(p.x-W/2)/sx,wy=cy-(p.y-H/2)/sy;
+  sx=cl(sx*kx);sy=cl(sy*ky);cx=wx-(p.x-W/2)/sx;cy=wy+(p.y-H/2)/sy;redraw();
+},{passive:false});
+
+/* ---------- wiring ---------- */
+new ResizeObserver(()=>{
+  const r=$('#plot').getBoundingClientRect();W=r.width;H=r.height;dpr=window.devicePixelRatio||1;
+  cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
+  if(!inited&&W){resetView();inited=1}
+  redraw();
+}).observe($('#plot'));
+$('#add').onclick=()=>addRow('1','0','').body.focus();
+$('#N').oninput=e=>{N=+e.target.value;$('#nout').textContent=N;redraw()};
+$('#reset').onclick=()=>{resetView();redraw()};
+$('#fit').onclick=fit;
+$('#parts').onchange=redraw;
+new MutationObserver(redraw).observe(document.documentElement,{attributes:true});
+matchMedia('(prefers-color-scheme:dark)').addEventListener('change',redraw);
+addRow('a_0','0','(-1)^n t^(2n+1)/(2n+1)!');redraw();
+</script>
+</body>
+</html>
