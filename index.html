@@ -26,6 +26,11 @@ h1{margin:0;font:italic 600 22px/1.2 "New York",Georgia,serif}
 input[type=text]{height:44px;min-width:0;padding:0 10px;-webkit-appearance:none;appearance:none;border:2px solid var(--axis);border-radius:8px;background:var(--field);color:var(--fg);font:17px ui-monospace,"SF Mono",Menlo,monospace}
 .body{width:100%}
 input[type=text]:focus{outline:2px solid var(--accent);outline-offset:0}
+input[aria-invalid=true]{border-color:var(--err)}
+#consts{display:flex;flex-wrap:wrap;gap:8px}
+#consts[hidden]{display:none}
+.kc{display:flex;align-items:center;gap:6px;font:italic 600 18px "New York",Georgia,serif}
+.kc input{width:110px}
 button{font:inherit;height:44px;min-width:44px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
 button:active{background:var(--line)}
 #ctl{display:flex;flex-direction:column;gap:6px}
@@ -35,7 +40,6 @@ input[type=range]{width:100%;height:44px;margin:0;accent-color:var(--accent)}
 .btns{display:flex;flex-wrap:wrap;gap:8px}
 .chk{display:flex;align-items:center;gap:10px;height:40px}
 .chk input{width:22px;height:22px;margin:0;accent-color:var(--accent)}
-.hint{margin:0;color:var(--mut);font-size:13px}
 #probe{position:absolute;top:12px;right:12px;padding:8px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;font-size:15px;font-variant-numeric:tabular-nums;pointer-events:none}
 #probe[hidden]{display:none}
 @media (orientation:portrait){#app{flex-direction:column}#plot{order:-1}#side{width:auto;height:48%;border-right:0;border-top:1px solid var(--line)}}
@@ -46,6 +50,7 @@ input[type=range]{width:100%;height:44px;margin:0;accent-color:var(--accent)}
   <aside id="side">
     <h1>y(t) = Σ cᵢ · Σₙ aₙ(t)</h1>
     <div id="rows"></div>
+    <div id="consts" hidden></div>
     <div id="ctl">
       <label class="sl" for="N"><span>Terms</span><output id="nout">20</output></label>
       <input type="range" id="N" min="1" max="150" value="20">
@@ -69,12 +74,14 @@ function gamma(x){
 const fact=x=>Number.isInteger(x)&&x>=0?(x<=170?FT[x]:Infinity):gamma(x+1);
 const M={...Object.fromEntries('sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh sqrt cbrt exp log abs sign floor ceil'.split(' ').map(k=>[k,Math[k]])),ln:Math.log,gamma,fact,P:Math.pow,F:fact};
 const NAMES='asinh acosh atanh sinh cosh tanh asin acos atan sqrt cbrt gamma sign floor ceil fact sin cos tan exp log ln abs pi e n t x'.split(' ').sort((a,b)=>b.length-a.length);
+const KRE=/a_?\{?(\d+)\}?/g;   /* a_0, a0, a_{0} -> user constant */
 function lex(s){
-  s=s.toLowerCase().replace(/[−–—]/g,'-').replace(/[×·⋅]/g,'*').replace(/÷/g,'/').replace(/π/g,'pi').replace(/√/g,'sqrt').replace(/\*\*/g,'^');
+  s=s.toLowerCase().replace(/[−–—]/g,'-').replace(/[×·⋅]/g,'*').replace(/÷/g,'/').replace(/π/g,'pi').replace(/√/g,'sqrt').replace(/\*\*/g,'^').replace(KRE,' @$1 ');
   const T=[];let m;
   while(s.length){
     if(m=/^\s+/.exec(s)){}
     else if(m=/^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/.exec(s))T.push({k:'num',v:m[0]});
+    else if(m=/^@(\d+)/.exec(s))T.push({k:'k',v:m[1]});
     else if(m=/^[a-z]+/.exec(s)){let w=m[0];while(w){const nm=NAMES.find(x=>w.startsWith(x));if(!nm)throw new Error(`Unknown “${w}”`);T.push({k:'id',v:nm});w=w.slice(nm.length)}}
     else if(m=/^[-+*\/^!(),]/.exec(s))T.push({k:'op',v:m[0]});
     else throw new Error(`Unexpected “${s[0]}”`);
@@ -94,6 +101,7 @@ function compile(src,vars){
   function atom(){
     const k=T[p++];if(!k)bad('Expression ends early');
     if(k.k==='num')return k.v;
+    if(k.k==='k'){if(!vars.includes('t'))bad(`a${k.v} isn’t available here`);return `K[${+k.v}]`}
     if(k.k==='op'){if(k.v!=='(')bad(`Unexpected “${k.v}”`);const a=expr();eat(')')||bad('Missing )');return `(${a})`}
     const v=k.v;
     if(v==='pi')return 'Math.PI';if(v==='e')return 'Math.E';
@@ -104,7 +112,7 @@ function compile(src,vars){
   }
   if(!T.length)bad('Empty');
   const code=expr();if(p<T.length)bad(`Unexpected “${T[p].v}”`);
-  return new Function('M',`return function(${vars}){return ${code}}`)(M);
+  return new Function('M','K',`return function(${vars}){return ${code}}`)(M,K);
 }
 
 /* ---------- state ---------- */
@@ -112,10 +120,34 @@ const $=s=>document.querySelector(s),cv=$('#cv'),ctx=cv.getContext('2d');
 let cx=0,cy=0,sx=50,sy=50,N=20,probe=null,W=0,H=0,dpr=1,inited=0,ci=0;
 const rows=[],PAL=['#e0475b','#1f9d8b','#d98a1f','#7a5cc4','#2f80d9','#7f9a2a'];
 const A='autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done"';
+const K={},ctext=new Map(),sub=i=>String(i).replace(/\d/g,d=>'₀₁₂₃₄₅₆₇₈₉'[d]);
+
+/* ---------- constants (a_0, a_1, …) ---------- */
+function setK(i,txt){
+  ctext.set(i,txt);
+  try{const v=compile(txt.trim()||'0','')();K[i]=isFinite(v)?v:NaN}catch(e){K[i]=NaN}
+}
+function syncConsts(){
+  const used=new Set(),box=$('#consts');
+  for(const r of rows)r.used.forEach(i=>used.add(i));
+  for(const el of [...box.children])if(!used.has(+el.dataset.i))el.remove();
+  for(const i of used){
+    if(!ctext.has(i))setK(i,'1');
+    if(box.querySelector(`[data-i="${i}"]`))continue;
+    const el=document.createElement('label');el.className='kc';el.dataset.i=i;
+    el.innerHTML=`<span>a${sub(i)} =</span><input type="text" aria-label="Value of a${i}" ${A}>`;
+    const inp=el.querySelector('input');inp.value=ctext.get(i);
+    inp.addEventListener('input',()=>{setK(i,inp.value);inp.setAttribute('aria-invalid',String(!isFinite(K[i])));redraw()});
+    box.append(el);
+  }
+  [...box.children].sort((a,b)=>a.dataset.i-b.dataset.i).forEach(el=>box.append(el));
+  box.hidden=!used.size;
+}
 
 /* ---------- rows ---------- */
 function compileRow(r){
-  r.f=null;r.err='';
+  r.f=null;r.err='';r.used=new Set();
+  for(const s of [r.coef.value,r.body.value])for(const m of s.toLowerCase().matchAll(KRE))r.used.add(+m[1]);
   if(r.body.value.trim()){
     try{
       r.c=compile(r.coef.value.trim()||'1','t');
@@ -125,6 +157,7 @@ function compileRow(r){
     }catch(e){r.err=e.message||String(e)}
   }
   r.msg.textContent=r.err;
+  syncConsts();
 }
 function addRow(c,s,b){
   const color=PAL[ci++%PAL.length],el=document.createElement('div');
@@ -133,7 +166,7 @@ function addRow(c,s,b){
   const q=k=>el.querySelector(k),r={el,color,coef:q('.coef'),start:q('.start'),body:q('.body'),msg:q('.msg')};
   r.coef.value=c;r.start.value=s;r.body.value=b;
   for(const i of [r.coef,r.start,r.body])i.addEventListener('input',()=>{compileRow(r);redraw()});
-  q('.x').onclick=()=>{el.remove();rows.splice(rows.indexOf(r),1);redraw()};
+  q('.x').onclick=()=>{el.remove();rows.splice(rows.indexOf(r),1);syncConsts();redraw()};
   $('#rows').append(el);rows.push(r);compileRow(r);
   return r;
 }
